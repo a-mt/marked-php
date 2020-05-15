@@ -3,8 +3,9 @@ error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
 if(isset($_POST['input'])) {
-    require __DIR__ . '/marked.php';
+    require __DIR__ . '/../marked.php';
 
+    $marked = new Marked\Marked();
     $marked->setOptions(['gfm' => true, 'headerIds' => true]);
 
     $marked($_POST['input'], function($err, $data) {

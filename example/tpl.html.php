@@ -3,6 +3,7 @@
     <head>
         <meta charset="UTF-8">
         <title>PHP Marked</title>
+        <link rel="stylesheet" href="style.css">
         <script>
             function preview(e) {
                 e.preventDefault();
@@ -11,7 +12,7 @@
                 data.append("input", this.elements.input.value);
                 data.append("ajax", 1);
 
-                window.fetch("/", {
+                window.fetch(window.location.pathname, {
                     method: "POST",
                     body: data
                 })
@@ -24,7 +25,7 @@
     </head>
     <body>
         <form method="POST" onSubmit="return preview.call(this, event)">
-            <div style="display: flex; max-height: 100vh;">
+            <div style="display: flex; max-height: 90vh;">
                 <textarea name="input" id="input" style="width: 100%; resize: vertical;" rows="30">## Quick check
 
 *ok* **strong**  
@@ -441,7 +442,7 @@ du texte après
   <dt>HMM'O<br></dt>
   <dd><p>Hydrogénosel</p></dd>
 </dl></textarea>
-                <div id="output" style="width: 100%; overflow: auto;"><?= $data ?></div>
+                <div id="output" class="markdown-body" style="width: 100%; overflow: auto;"><?= $data ?></div>
             </div>
             <input type="submit" value="Preview">
         </form>

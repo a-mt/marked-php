@@ -1,5 +1,6 @@
 <?php
-// https://cdnjs.cloudflare.com/ajax/libs/marked/1.0.0/marked.js
+// Based on https://cdnjs.cloudflare.com/ajax/libs/marked/1.0.0/marked.js
+namespace Marked;
 
 class Defaults {
   /**
@@ -2627,4 +2628,3 @@ class Marked {
     trigger_error('Undefined property: ' . __CLASS__ . '::$' . $name, E_USER_NOTICE);
   }
 }
-$marked = new Marked();
