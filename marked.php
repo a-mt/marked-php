@@ -42,12 +42,6 @@ class Defaults {
 }
 Defaults::$defaults = Defaults::getDefaults();
 
-/*
-  var defaults_1 = defaults.defaults;
-  var defaults_2 = defaults.getDefaults;
-  var defaults_3 = defaults.changeDefaults;
-*/
-
 //+--------------------------------------------------------
 
 /**
@@ -242,17 +236,18 @@ class Helpers {
       }
     }
 
-    if ($base && !preg_match($originIndependentUrl, $href)) {
+    if ($base && !preg_match(self::$originIndependentUrl, $href)) {
       $href = self::resolveUrl($base, $href);
     }
 
+    /*
     try {
       $href = urlencode($href);
       $href = str_replace("%25", '%', $href);
     } catch (Exception $e) {
       return null;
     }
-
+    */
     return $href;
   }
 
@@ -412,28 +407,6 @@ class Helpers {
 
 }
 
-/*
-var helpers = {
-  escape: escape,
-  unescape: unescape,
-  edit: edit,
-  cleanUrl: cleanUrl,
-  resolveUrl: resolveUrl,
-  noopTest: noopTest,
-  merge: merge,
-  splitCells: splitCells,
-  rtrim: rtrim,
-  findClosingBracket: findClosingBracket,
-  checkSanitizeDeprecation: checkSanitizeDeprecation
-};
-
-var defaults$1 = defaults.defaults;
-var rtrim$1 = helpers.rtrim,
-    splitCells$1 = helpers.splitCells,
-    _escape = helpers.escape,
-    findClosingBracket$1 = helpers.findClosingBracket;
-*/
-
 //+--------------------------------------------------------
 
 /**
@@ -468,7 +441,7 @@ class Tokenizer {
         ];
       }
       return [
-        'raw' => '\n'
+        'raw' => "\n"
       ];
     }
   }
@@ -486,8 +459,8 @@ class Tokenizer {
 
       if ($lastToken && $lastToken['type'] === 'paragraph') {
         array_pop($tokens);
-        $lastToken['text'] += '\n' . rtrim($cap[0]);
-        $lastToken['raw']  += '\n' . $cap[0];
+        $lastToken['text'] .= "\n" . rtrim($cap[0]);
+        $lastToken['raw']  .= "\n" . $cap[0];
         return $lastToken;
 
       } else {
@@ -496,7 +469,7 @@ class Tokenizer {
           'type' => 'code',
           'raw' => $cap[0],
           'codeBlockStyle' => 'indented',
-          'text' => !$this->options['pedantic'] ? rtrim($text, '\n') : $text
+          'text' => !$this->options['pedantic'] ? rtrim($text, "\n") : $text
         ];
       }
     }
@@ -548,7 +521,7 @@ class Tokenizer {
         'type' => 'table',
         'header' => Helpers::splitCells(preg_replace('/^ *| *\| *$/', '', $cap[1])),
         'align' => preg_split('/ *\| */', preg_replace('/^ *|\| *$/', '', $cap[2])),
-        'cells' => $cap[3] ? explode("\n", preg_replace('/\n$/', '', $cap[3])) : [],
+        'cells' => @$cap[3] ? explode("\n", preg_replace('/\n$/', '', $cap[3])) : [],
         'raw' => $cap[0]
       ];
 
@@ -650,7 +623,7 @@ class Tokenizer {
 
         // Outdent whatever the
         // list item contains. Hacky.
-        if (strpos($item, '\n ') !== false) {
+        if (strpos($item, "\n ") !== false) {
           $space -= strlen($item);
           $item = !$this->options['pedantic'] ? preg_replace('/^ {1,' . $space . '}/m', '', $item) : preg_replace('/^ {1,4}/m', '', $item);
         }
@@ -673,7 +646,7 @@ class Tokenizer {
         $loose = preg_match('/\n\n(?!\s*$)/', $item);
 
         if (!$loose && $i !== $l - 1) {
-          $loose = $item[strlen($item) - 1] === '\n';
+          $loose = $item[strlen($item) - 1] === "\n";
         }
         if ($loose) {
           $list['loose'] = true;
@@ -753,7 +726,7 @@ class Tokenizer {
         'type' => 'table',
         'header' => Helpers::splitCells(preg_replace('/^ *| *\| *$/', '', $cap[1])),
         'align' => preg_split('/ *\| */', preg_replace('/^ *|\| *$/', '', $cap[2])),
-        'cells' => $cap[3] ? explode('\n', preg_replace('/\n$/', '', $cap[3])) : []
+        'cells' => $cap[3] ? explode("\n", preg_replace('/\n$/', '', $cap[3])) : []
       ];
 
       if (sizeof($item['header']) === sizeof($item['align'])) {
@@ -815,7 +788,7 @@ class Tokenizer {
       return [
         'type' => 'paragraph',
         'raw' => $cap[0],
-        'text' => $cap[1][strlen($cap[1]) - 1] === '\n' ? substr($cap[1], 0, -1) : $cap[1]
+        'text' => $cap[1][strlen($cap[1]) - 1] === "\n" ? substr($cap[1], 0, -1) : $cap[1]
       ];
     }
   }
@@ -1124,12 +1097,6 @@ class Tokenizer {
     }
   }
 }
-
-/*
-var noopTest$1 = helpers.noopTest,
-    edit$1 = helpers.edit,
-    merge$1 = helpers.merge;
-*/
 
 //+--------------------------------------------------------
 
@@ -1445,12 +1412,6 @@ class Rules {
   }
 }
 Rules::init();
-
-/*
-var defaults$2 = defaults.defaults;
-var block$1 = rules.block,
-    inline$1 = rules.inline;
-*/
 
 //+--------------------------------------------------------
 
@@ -1911,22 +1872,6 @@ function mangle($text) {
   }
 }
 
-/*
-_createClass(Lexer, null, [{
-  key: "rules",
-  get: function get() {
-    return {
-      block: block$1,
-      inline: inline$1
-    };
-  }
-}]);
-
-var defaults$3 = defaults.defaults;
-var cleanUrl$1 = helpers.cleanUrl,
-  escape$1 = helpers.escape;
-*/
-
 //+--------------------------------------------------------
 
 /**
@@ -1972,7 +1917,7 @@ class Renderer {
     }
     return '<pre><code' . $attrs . '>'
               . ($escaped ? $src : Helpers::escape($src, true))
-              . '</code></pre>\n';
+              . "</code></pre>\n";
   }
 
   /**
@@ -1980,7 +1925,7 @@ class Renderer {
    * @return string
    */
   public function blockquote($src) {
-    return '<blockquote>\n' . $src . '</blockquote>\n';
+    return "<blockquote>\n" . $src . "</blockquote>\n";
   }
 
   /**
@@ -2003,15 +1948,14 @@ class Renderer {
     if($this->options['headerIds']) {
       $attrs = ' id="' . $this->options['headerPrefix'] . $slugger->slug($raw) . '"';
     }
-
-    return '<h' . $level . '>' . $src . '</h' . $level . '>\n';
+    return '<h' . $level . $attrs . '>' . $src . '</h' . $level . '>' . "\n";
   }
 
   /**
    * @return string
    */
   public function hr() {
-    return $this->options['xhtml'] ? '<hr/>\n' : '<hr>\n';
+    return $this->options['xhtml'] ? "<hr/>\n" : "<hr>\n";
   }
 
   /**
@@ -2022,22 +1966,28 @@ class Renderer {
    */
   public function list($src, $ordered, $start = 1) {
     if(!$ordered) {
-      return '<ul>\n' . $src . '</ul>\n';
+      return "<ul>\n" . $src . "</ul>\n";
     }
 
     $attrs = '';
     if($start != 1) {
       $attrs = ' start="' . $start . '"';
     }
-    return '<ol' . $attrs . '>\n' . $src . '</ol>\n';
+    return '<ol' . $attrs . ">\n" . $src . "</ol>\n";
   }
 
   /**
    * @param string $src
+   * @param boolean $isTask
+   * @param boolean $isChecked
    * @return string
    */
-  public function listitem($src) {
-    return '<li>' . $src . '</li>\n';
+  public function listitem($src, $isTask, $isChecked) {
+    $attrs = '';
+    if($isTask) {
+      $attrs = ' class="task' . ($isChecked ? ' checked' : '') . '"';
+    }
+    return '<li' . $attrs . '>' . $src . "</li>\n";
   }
 
   /**
@@ -2053,7 +2003,7 @@ class Renderer {
    * @return string
    */
   public function paragraph($src) {
-    return '<p>' . $src . '</p>\n';
+    return '<p>' . $src . "</p>\n";
   }
 
   /**
@@ -2062,10 +2012,10 @@ class Renderer {
    * @return string
    */
   public function table($header, $body) {
-    return '<table>\n'
-      . '<thead>\n' . $header . '</thead>\n'
-      . ($body ? '<tbody>\n' . $body . '</tbody>\n' : '')
-      . '</table>\n';
+    return "<table>\n"
+      . "<thead>\n" . $header . "</thead>\n"
+      . ($body ? "<tbody>\n" . $body . "</tbody>\n" : '')
+      . "</table>\n";
   }
 
   /**
@@ -2073,7 +2023,7 @@ class Renderer {
    * @return string
    */
   public function tablerow($src) {
-    return '<tr>' . $src . '</tr>\n';
+    return '<tr>' . $src . "</tr>\n";
   }
 
   /**
@@ -2086,9 +2036,9 @@ class Renderer {
     $attrs = ' align="' . $flags['align'] . '"';
 
     if($flags['header']) {
-      return '<th' . $attrs . '>' . $src . '</th>\n';
+      return '<th' . $attrs . '>' . $src . "</th>\n";
     } else {
-      return '<td' . $attrs . '>' . $src . '</td>\n';
+      return '<td' . $attrs . '>' . $src . "</td>\n";
     }
   }
 
@@ -2267,11 +2217,6 @@ class Slugger {
   }
 }
 
-/*
-var defaults$4 = defaults.defaults;
-var unescape$1 = helpers.unescape;
-*/
-
 /**
  * Parsing & Compiling
  */
@@ -2398,7 +2343,7 @@ class Parser {
           continue;
 
         case 'blockquote':
-          $body = $this->parse($token['tokens']);
+          $body = $this->_parse($token['tokens']);
           $out .= $this->renderer->blockquote($body);
           continue;
 
@@ -2441,7 +2386,7 @@ class Parser {
               } // end else $loose
             } // end if $item['task']
 
-            $itemBody .= $this->parse($item['tokens'], $loose);
+            $itemBody .= $this->_parse($item['tokens'], $loose);
             $body .= $this->renderer->listitem($itemBody, $task, $checked);
           } // end for
 
@@ -2462,7 +2407,7 @@ class Parser {
 
           while ($i + 1 < $l && $tokens[$i + 1]['type'] === 'text') {
             $token = $tokens[++$i];
-            $body .= '\n' . (isset($token['tokens']) ? $this->parseInline($token['tokens']) : $token['text']);
+            $body .= "\n" . (isset($token['tokens']) ? $this->parseInline($token['tokens']) : $token['text']);
           }
   
           $out .= $top ? $this->renderer->paragraph($body) : $body;
@@ -2554,15 +2499,6 @@ class Parser {
     return $out;
   }
 }
-
-/*
-var merge$2 = helpers.merge,
-    checkSanitizeDeprecation$1 = helpers.checkSanitizeDeprecation,
-    escape$2 = helpers.escape;
-var getDefaults = defaults.getDefaults,
-    changeDefaults = defaults.changeDefaults,
-    defaults$5 = defaults.defaults;
-*/
 
 //+--------------------------------------------------------
 
@@ -2692,18 +2628,3 @@ class Marked {
   }
 }
 $marked = new Marked();
-
-/*
-marked.Parser = Parser_1;
-marked.parser = Parser_1.parse;
-marked.Renderer = Renderer_1;
-marked.TextRenderer = TextRenderer_1;
-marked.Lexer = Lexer_1;
-marked.lexer = Lexer_1.lex;
-marked.Tokenizer = Tokenizer_1;
-marked.Slugger = Slugger_1;
-marked.parse = marked;
-var marked_1 = marked;
-
-return marked_1;
-*/

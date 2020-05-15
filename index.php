@@ -5,6 +5,8 @@ ini_set('display_errors', '1');
 if(isset($_POST['input'])) {
     require __DIR__ . '/marked.php';
 
+    $marked->setOptions(['gfm' => true, 'headerIds' => true]);
+
     $marked($_POST['input'], function($err, $data) {
         if($err) {
             throw new Exception($err);
