@@ -130,6 +130,18 @@ function random_0_1() {
   return (float)rand() / (float)getrandmax();
 }
 
+/**
+ * URL-encodes a string but doesn't encode
+ * characters that have special meaning (reserved characters) for a URI
+ * @param string $uri
+ * @return string
+ */
+function encodeURI($uri) {
+  return preg_replace_callback("{[^0-9a-z_.!~*'();,/?:@&=+$#-]}i", function ($m) {
+    return sprintf('%%%02X', ord($m[0]));
+  }, $uri);
+}
+
 //+--------------------------------------------------------
 
 /**
@@ -241,14 +253,12 @@ class Helpers {
       $href = self::resolveUrl($base, $href);
     }
 
-    /*
     try {
-      $href = urlencode($href);
+      $href = encodeURI($href);
       $href = str_replace("%25", '%', $href);
     } catch (Exception $e) {
       return null;
     }
-    */
     return $href;
   }
 
