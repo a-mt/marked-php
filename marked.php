@@ -920,7 +920,7 @@ class Tokenizer {
     if (($cap = preg_match_get($this->rules['inline']['reflink'], $src))
       || ($cap = preg_match_get($this->rules['inline']['nolink'], $src))) {
 
-      $link = preg_replace('/\s+/', ' ', $cap[2] ? $cap[2] : $cap[1]);
+      $link = preg_replace('/\s+/', ' ', @$cap[2] ? $cap[2] : $cap[1]);
       $link = @$links[strtolower($link)];
 
       if (!$link || !$link['href']) {
