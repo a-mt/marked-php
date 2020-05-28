@@ -164,6 +164,11 @@
   margin-top: 0;
   padding-top: 16px;
 }
+.markdown-body .emoji {
+  max-width: none;
+  vertical-align: text-top;
+  background-color: initial;
+}
 
 /* HIGHLIGHT.js */
 /* https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.1/styles/default.min.css */
