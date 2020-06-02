@@ -69,17 +69,17 @@ class Obj {
  * @return string
  */
 function preg_replace_callback_offset($pattern, $callback, $subject) {
-    $offset = 0;
+  $offset = 0;
 
-    while(preg_match($pattern, $subject, $matches, PREG_OFFSET_CAPTURE, $offset)) {
-        list($match, $pos) = $matches[0];
+  while(preg_match($pattern, $subject, $matches, PREG_OFFSET_CAPTURE, $offset)) {
+    list($match, $pos) = $matches[0];
 
-        $replace = $callback($match, $pos, $subject);
-        $subject = substr_replace($subject, $replace, $pos, strlen($match));
-        
-        $offset  = $pos + strlen($replace);
-    }
-    return $subject;
+    $replace = $callback($match, $pos, $subject);
+    $subject = substr_replace($subject, $replace, $pos, strlen($match));
+
+    $offset  = $pos + strlen($replace);
+  }
+  return $subject;
 }
 
 /**
@@ -696,7 +696,7 @@ class Tokenizer {
       return [
         'type' => $this->options['sanitize'] ? 'paragraph' : 'html',
         'raw' => $cap[0],
-        'pre' => !$this->options['sanitizer'] && ($cap[1] === 'pre' || $cap[1] === 'script' || $cap[1] === 'style'),
+        'pre' => !$this->options['sanitizer'] && isset($cap[1]) && ($cap[1] === 'pre' || $cap[1] === 'script' || $cap[1] === 'style'),
         'text' => $this->options['sanitize'] ? $this->options['sanitizer'] ? $this->options['sanitizer']($cap[0]) : Helpers::escape($cap[0]) : $cap[0]
       ];
     }
@@ -1563,7 +1563,7 @@ function mangle($text) {
    */
  public function blockTokens($src, $tokens = [], $top = true) {
     $src = preg_replace('/^ +$/m', '', $src);
-    while($src) {
+    while($src !== '') {
 
       // newline
       if($token = $this->tokenizer->space($src)) {
@@ -1623,7 +1623,7 @@ function mangle($text) {
       if ($token = $this->tokenizer->list($src)) {
         $src = substr($src, strlen($token['raw']));
         $l = sizeof($token['items']);
-      
+
         for ($i = 0; $i < $l; $i++) {
           $token['items'][$i]['tokens'] = $this->blockTokens($token['items'][$i]['text'], [], false);
         }
@@ -1740,14 +1740,14 @@ function mangle($text) {
           break;
         
         case 'blockquote':
-          $this->inline($token['tokens']);
+          $token['tokens'] = $this->inline($token['tokens']);
           break;
         
         case 'list':
           $l2 = sizeof($token['items']);
 
           for ($j = 0; $j < $l2; $j++) {
-            $this->inline($token['items'][$j]['tokens']);
+            $token['items'][$j]['tokens'] = $this->inline($token['items'][$j]['tokens']);
           }
           break;
 
@@ -1765,7 +1765,7 @@ function mangle($text) {
    * @return array
    */
   public function inlineTokens($src, $tokens = [], $inLink = false, $inRawBlock = false) {
-    while($src) {
+    while($src !== '') {
 
       // escape
       if ($token = $this->tokenizer->escape($src)) {
@@ -1846,21 +1846,21 @@ function mangle($text) {
       }
 
       // autolink
-      if ($token = $this->tokenizer->autolink($src, "mangle")) {
+      if ($token = $this->tokenizer->autolink($src, __NAMESPACE__ . "\mangle")) {
         $src = substr($src, strlen($token['raw']));
         $tokens[] = $token;
         continue;
       }
 
       // url (gfm)
-      if (!$inLink && ($token = $this->tokenizer->url($src, "mangle"))) {
-        $src = substr($src, strlen($token['raw']));
+      if (!$inLink && ($token = $this->tokenizer->url($src, __NAMESPACE__ . "\mangle"))) {
         $tokens[] = $token;
+        $src = substr($src, strlen($token['raw']));
         continue;
       }
 
       // text
-      if ($token = $this->tokenizer->inlineText($src, $inRawBlock, "smartypants")) {
+      if ($token = $this->tokenizer->inlineText($src, $inRawBlock, __NAMESPACE__ . "\smartypants")) {
         $src = substr($src, strlen($token['raw']));
         $tokens[] = $token;
         continue;
@@ -2409,7 +2409,6 @@ class Parser {
           continue;
 
         case 'paragraph':
-          // TODO tokens isn't defined?
           $out .= $this->renderer->paragraph(isset($token['tokens']) ? $this->parseInline($token['tokens']) : $token['text']);
           continue;
 
@@ -2587,7 +2586,7 @@ class Marked {
       }
       return $callback(null, $out);
     };
-  
+
     if(!$highlight || !$pending) {
       return $done();
     }
