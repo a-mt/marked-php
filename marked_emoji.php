@@ -28,8 +28,8 @@ class EmojiRenderer extends Renderer {
             // Emoji has an image but doesn't exist in Unicode (ex :atom:)
             if(!$char) {
               return '<img class="emoji"
-                       title=":' . $name . ':"
-                       alt=":' . $name . ':"
+                       title="' . $name . '"
+                       alt="' . $name . '"
                        src="https://github.githubassets.com/images/icons/emoji/' . $name . '.png"
                        width="20" height="20" align="absmiddle">';
 
@@ -39,12 +39,12 @@ class EmojiRenderer extends Renderer {
 
               return '<g-emoji class="g-emoji"
                                alias="' . $name . '"
-                               fallback-src="https://github.githubassets.com/images/icons/emoji/unicode/' . $hexa . '.png">
-                        <img class="emoji"
+                               fallback-src="https://github.githubassets.com/images/icons/emoji/unicode/' . $hexa . '.png">'
+                        . '<img class="emoji"
                              alt="' . $name . '"
                              src="https://github.githubassets.com/images/icons/emoji/unicode/' . $hexa . '.png"
-                             width="20" height="20">
-                      </g-emoji>';
+                             width="20" height="20">'
+                      . '</g-emoji>';
             }
           }, $_text);
     }
