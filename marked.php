@@ -462,18 +462,17 @@ class Tokenizer {
    * @param array $tokens
    * @return array | null
    */
-  public function code($src, &$tokens) {
+  public function code($src, $tokens) {
     $cap = preg_match_get($this->rules['block']['code'], $src);
 
     if ($cap) {
-      $lastToken = $tokens[sizeof($tokens) - 1]; // An indented code block cannot interrupt a paragraph.
-
-      if ($lastToken && $lastToken['type'] === 'paragraph') {
-        array_pop($tokens);
-        $lastToken['text'] .= "\n" . rtrim($cap[0]);
-        $lastToken['raw']  .= "\n" . $cap[0];
-        return $lastToken;
-
+      // An indented code block cannot interrupt a paragraph.
+      if ($tokens && $tokens[sizeof($tokens) - 1]['type'] === 'paragraph') {
+        return [
+          'type' => '',
+          'raw'  => $cap[0],
+          'text' => rtrim($cap[0])
+        ];
       } else {
         $text = preg_replace('/^ {4}/m', '', $cap[0]);
         return [
@@ -673,6 +672,7 @@ class Tokenizer {
         }
 
         $list['items'][] = [
+          'type' => 'list_item',
           'raw' => $raw,
           'task' => $istask,
           'checked' => $ischecked,
@@ -806,12 +806,20 @@ class Tokenizer {
 
   /**
    * @param string $src
+   * @param array $tokens
    * @return array | null
    */
-  public function text($src) {
+  public function text($src, $tokens) {
     $cap = preg_match_get($this->rules['block']['text'], $src);
 
     if ($cap) {
+      if ($tokens && $tokens[sizeof($tokens) - 1]['type'] === 'text') {
+        return [
+          'type' => '',
+          'raw'  => $cap[0],
+          'text' => $cap[0]
+        ];
+      }
       return [
         'type' => 'text',
         'raw' => $cap[0],
@@ -1578,7 +1586,15 @@ function mangle($text) {
       // code
       if ($token = $this->tokenizer->code($src, $tokens)) {
         $src = substr($src, strlen($token['raw']));
-        $tokens[] = $token;
+
+        if($token['type']) {
+          $tokens[] = $token;
+        } else {
+          $lastToken = &$tokens[sizeof($tokens)-1];
+
+          $lastToken['raw']  .= "\n" . $token['raw'];
+          $lastToken['text'] .= "\n" . $token['text'];
+        }
         continue;
       }
       
@@ -1627,7 +1643,6 @@ function mangle($text) {
         for ($i = 0; $i < $l; $i++) {
           $token['items'][$i]['tokens'] = $this->blockTokens($token['items'][$i]['text'], [], false);
         }
-      
         $tokens[] = $token;
         continue;
       }
@@ -1674,9 +1689,17 @@ function mangle($text) {
       }
       
       // text
-      if ($token = $this->tokenizer->text($src)) {
+      if ($token = $this->tokenizer->text($src, $tokens)) {
         $src = substr($src, strlen($token['raw']));
-        $tokens[] = $token;
+
+        if($token['type']) {
+          $tokens[] = $token;
+        } else {
+          $lastToken = &$tokens[sizeof($tokens)-1];
+
+          $lastToken['raw']  .= "\n" . $token['raw'];
+          $lastToken['text'] .= "\n" . $token['text'];
+        }
         continue;
       }
       
