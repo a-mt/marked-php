@@ -1,7 +1,7 @@
 # Marked
 
 Convert Markdown to HTML.  
-PHP transpiling of [@markedjs/marked](https://github.com/markedjs/marked)
+PHP transpiling of [markedjs/marked@1.2.7](https://github.com/markedjs/marked)
 
 ``` php
 <?php

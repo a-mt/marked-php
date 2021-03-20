@@ -1,5 +1,5 @@
 <?php
-// Based on https://cdnjs.cloudflare.com/ajax/libs/marked/1.0.0/marked.js
+// Based on https://cdnjs.cloudflare.com/ajax/libs/marked/1.2.7/marked.js
 namespace Marked;
 
 class Defaults {
@@ -396,26 +396,48 @@ class Helpers {
   public static function outputLink($cap, $link, $raw) {
     $href  = $link['href'];
     $title = $link['title'] ? Helpers::escape($link['title']) : null;
-  
+    $text  = preg_replace("/\\\\([\\[\\]])/", "$1", $cap[1]);
+
     if ($cap[0][0] !== '!') {
       return [
         'type' => 'link',
         'raw' => $raw,
         'href' => $href,
         'title' => $title,
-        'text' => $cap[1]
+        'text' => $text
       ];
     } else {
       return [
         'type' => 'image',
         'raw' => $raw,
-        'text' => Helpers::escape($cap[1]),
         'href' => $href,
-        'title' => $title
+        'title' => $title,
+        'text' => Helpers::escape($text)
       ];
     }
   }
+}
 
+function indentCodeCompensation($raw, $text) {
+  if(!preg_match('/^(\s+)(?:```)/', $raw, $matchIndentToCode)) {
+    return $text;
+  }
+
+  $indentToCode = $matchIndentToCode[1];
+  $indentToCodeLen = strlen($indentToCode);
+
+  return join("\n", array_map(function($node) use($indentToCodeLen){
+    if(!preg_match('/^\s+/', $node, $matchIndentInNode)) {
+      return $node;
+    }
+    $indentInNode = $matchIndentInNode[0];
+
+    if(strlen($indentInNode) >= $indentToCodeLen) {
+      return substr($node, $indentToCodeLen);
+    }
+    return $node;
+
+  }, explode("\n", $text)));
 }
 
 //+--------------------------------------------------------
@@ -493,11 +515,14 @@ class Tokenizer {
     $cap = preg_match_get($this->rules['block']['fences'], $src);
 
     if ($cap) {
+      $raw  = $cap[0];
+      $text = indentCodeCompensation($raw, $cap[3] ? $cap[3] : '');
+
       return [
         'type' => 'code',
-        'raw' => $cap[0],
+        'raw'  => $raw,
         'lang' => $cap[2] ? trim($cap[2]) : $cap[2],
-        'text' => $cap[3] ? $cap[3] : ''
+        'text' => $text
       ];
     }
   }
@@ -510,11 +535,23 @@ class Tokenizer {
     $cap = preg_match_get($this->rules['block']['heading'], $src);
 
     if ($cap) {
+      $text = trim($cap[2]);
+
+      // remove trailing #s
+      if(preg_match('/#$/', $text)) {
+        $trimmed = rtrim($text, '#');
+
+        // CommonMark requires space before trailing #s
+        if($this->options['pedantic'] || !$trimmed || preg_match('/ $/', $trimmed)) {
+          $text = trim($trimmed);
+        }
+      }
+
       return [
         'type' => 'heading',
         'raw' => $cap[0],
         'depth' => strlen($cap[1]),
-        'text' => $cap[2]
+        'text' => $text
       ];
     }
   }
@@ -613,12 +650,13 @@ class Tokenizer {
         'type' => 'list',
         'raw' => $raw,
         'ordered' => $isordered,
-        'start' => $isordered ? intval($bull) : '',
+        'start' => $isordered ? intval(substr($bull, 0, -1)) : '',
         'loose' => false,
         'items' => []
       ]; // Get each top-level item.
 
       $itemMatch = preg_match_all_get($this->rules['block']['item'], $cap[0]);
+      $bcurr     = preg_match_get($this->rules['block']['listItemStart'], $itemMatch[0]);
 
       $l = sizeof($itemMatch);
 
@@ -626,28 +664,41 @@ class Tokenizer {
         $item = $itemMatch[$i];
         $raw = $item;
 
+        // Determine whether the next list item belongs here.
+        // Backpedal if it does not belong in this list.
+        if ($i !== $l - 1) {
+          $bnext = preg_match_get($this->rules['block']['listItemStart'], $itemMatch[$i + 1]);
+
+          // nested list
+          if(strlen($bnext[1]) > strlen($bcurr[0]) || strlen($bnext[1]) > 3) {
+            array_splice($itemMatch, $i, 2, array($itemMatch[$i] . "\n" . $itemMatch[$i + 1]));
+            $i--;
+            $l--;
+            continue;
+
+          // different bullet style
+          } else if(!$this->options['pedantic'] || $this->options['smartLists']
+            ? $bnext[2][strlen($bnext[2]) - 1] != $bull[strlen($bull) - 1]
+            : $isordered ===  (strlen($bnext[2]) === 1)
+          ) {
+            $addBack     = implode("\n", array_slice($itemMatch, $i + 1));
+            $list['raw'] = substr($list['raw'], 0, strlen($list['raw']) - strlen($addBack));
+            $i = $l - 1;
+          }
+
+          $bcurr = $bnext;
+        }
+
         // Remove the list item's bullet
         // so it is seen as the next token.
         $space = strlen($item);
-        $item = preg_replace('/^ *([*+-]|\d+\.) */', '', $item);
+        $item = preg_replace('/^ *([*+-]|\d+[.)]) ?/', '', $item);
 
         // Outdent whatever the
         // list item contains. Hacky.
         if (strpos($item, "\n ") !== false) {
           $space -= strlen($item);
           $item = !$this->options['pedantic'] ? preg_replace('/^ {1,' . $space . '}/m', '', $item) : preg_replace('/^ {1,4}/m', '', $item);
-        }
-
-        // Determine whether the next list item belongs here.
-        // Backpedal if it does not belong in this list.
-        if ($i !== $l - 1) {
-          $b = preg_match_get($this->rules['block']['bullet'], $itemMatch[$i + 1])[0];
-
-          if((strlen($bull) > 1 ? strlen($b) === 1 : strlen($b) > 1) || $this->options['smartLists'] && $b !== $bull) {
-            $addBack     = implode("\n", array_slice($itemMatch, $i + 1));
-            $list['raw'] = substr($list['raw'], 0, strlen($list['raw']) - strlen($addBack));
-            $i = $l - 1;
-          }
         }
 
         // Determine whether item is loose or not.
@@ -663,12 +714,14 @@ class Tokenizer {
         }
 
         // Check for task list items
-        $istask = preg_match('/^\[[ xX]\] /', $item);
-        $ischecked = false;
+        if($this->options['gfm']) {
+          $istask = preg_match('/^\[[ xX]\] /', $item);
+          $ischecked = false;
 
-        if ($istask) {
-          $ischecked = $item[1] !== ' ';
-          $item = preg_replace('/^\[[ xX]\] +/', '', $item);
+          if ($istask) {
+            $ischecked = $item[1] !== ' ';
+            $item = preg_replace('/^\[[ xX]\] +/', '', $item);
+          }
         }
 
         $list['items'][] = [
@@ -884,38 +937,65 @@ class Tokenizer {
     $cap = preg_match_get($this->rules['inline']['link'], $src);
 
     if ($cap) {
-      $lastParenIndex = Helpers::findClosingBracket($cap[2], '()');
+      $trimmedUrl = trim($cap[2]);
 
-      if ($lastParenIndex > -1) {
-        $start = strpos($cap[0], '!') === 0 ? 5 : 4;
-        $linkLen = $start + strlen($cap[1]) + $lastParenIndex;
-        $cap[2] = substr($cap[2], 0, $lastParenIndex);
-        $cap[0] = trim(substr($cap[0], 0, $linkLen));
-        $cap[3] = '';
+      // commonmark requires matching angle brackets
+      if(!$this->options['pedantic'] && preg_match('/^</', $trimmedUrl)) {
+
+        if (!preg_match('/>$/', $trimmedUrl)) {
+          return;
+        }
+
+        // ending angle bracket cannot be escaped
+        $rtrimSlash = rtrim(substr($trimmedUrl, 0, -1), '\\');
+
+        if(strlen($trimmedUrl) - strlen($rtrimSlash) % 2 === 0) {
+          return;
+        }
+
+      } else {
+        // find closing parenthesis
+        $lastParenIndex = Helpers::findClosingBracket($cap[2], '()');
+
+        if ($lastParenIndex > -1) {
+          $start = strpos($cap[0], '!') === 0 ? 5 : 4;
+          $linkLen = $start + strlen($cap[1]) + $lastParenIndex;
+          $cap[2] = substr($cap[2], 0, $lastParenIndex);
+          $cap[0] = trim(substr($cap[0], 0, $linkLen));
+          $cap[3] = '';
+        }
       }
 
       $href = $cap[2];
       $title = '';
 
+      // split pedantic href and title
       if ($this->options['pedantic']) {
         $link = preg_match_get('/^([^\'"]*[^\s])\s+([\'"])(.*)\2/', $href);
 
         if ($link) {
           $href = $link[1];
           $title = $link[3];
-        } else {
-          $title = '';
         }
       } else {
         $title = isset($cap[3]) ? substr($cap[3], 1, -1) : '';
       }
 
-      $href = preg_replace('/^<([\s\S]*)>$/', '$1', trim($href));
-      $token = Helpers::outputLink($cap, [
+      $href = trim($href);
+
+      // pedantic allows starting angle bracket without ending angle bracket
+      if (preg_match('/^</', $href)) {
+        if ($this->options['pedantic'] && !preg_match('/>$/', $trimmedUrl)) {
+          $href = substr($href, 1);
+        } else {
+          $href = substr($href, 1, -1);
+        }
+      }
+
+      return Helpers::outputLink($cap, [
         'href' => $href ? preg_replace($this->rules['inline']['_escapes'], '$1', $href) : $href,
         'title' => $title ? preg_replace($this->rules['inline']['_escapes'], '$1', $title) : $title
       ], $cap[0]);
-      return $token;
     }
   }
 
@@ -948,15 +1028,30 @@ class Tokenizer {
    * @param string $src
    * @return array | null
    */
-  public function strong($src) {
-    $cap = preg_match_get($this->rules['inline']['strong'], $src);
+  public function strong($src, $maskedSrc='', $prevChar='') {
+    $match = preg_match_get($this->rules['inline']['strong']['start'], $src);
 
-    if ($cap) {
-      return [
-        'type' => 'strong',
-        'raw' => $cap[0],
-        'text' => or_get(@$cap[4], @$cap[3], @$cap[2], @$cap[1])
-      ];
+    if ($match && (!@$match[1] || $prevChar === '' || preg_match($this->rules['inline']['punctuation'], $prevChar))) {
+      $maskedSrc = substr($maskedSrc, 0-strlen($src));
+
+      $endReg    = $this->rules['inline']['strong'][$match[0] === '**' ? 'endAst' : 'endUnd'];
+      $lastIndex = 0;
+
+      while(preg_match($endReg, $maskedSrc, $matches, PREG_OFFSET_CAPTURE, $lastIndex)) {
+        list($match, $index) = $matches[0];
+
+        $lastIndex = $index + strlen($match);
+
+        $cap = preg_match_get($this->rules['inline']['strong']['middle'], substr($maskedSrc, 0, $index+3));
+
+        if($cap) {
+          return [
+            'type' => 'strong',
+            'raw'  => substr($src, 0, strlen($cap[0])),
+            'text' => substr($src, 2, strlen($cap[0])-4)
+          ];
+        }
+      }
     }
   }
 
@@ -964,15 +1059,30 @@ class Tokenizer {
    * @param string $src
    * @return array | null
    */
-  public function em($src) {
-    $cap = preg_match_get($this->rules['inline']['em'], $src);
+  public function em($src, $maskedSrc='', $prevChar='') {
+    $match = preg_match_get($this->rules['inline']['em']['start'], $src);
 
-    if ($cap) {
-      return [
-        'type' => 'em',
-        'raw' => $cap[0],
-        'text' => or_get(@$cap[6], @$cap[5], @$cap[4], @$cap[3], @$cap[2], @$cap[1])
-      ];
+    if($match && (!@$match[1] || ($prevChar === '' || preg_match($this->rules['inline']['punctuation'], $prevChar)))) {
+      $maskedSrc = substr($maskedSrc, 0-strlen($src));
+
+      $endReg    = $this->rules['inline']['em'][$match[0] === '*' ? 'endAst' : 'endUnd'];
+      $lastIndex = 0;
+
+      while(preg_match($endReg, $maskedSrc, $matches, PREG_OFFSET_CAPTURE, $lastIndex)) {
+        list($match, $index) = $matches[0];
+
+        $lastIndex = $index + strlen($match);
+
+        $cap = preg_match_get($this->rules['inline']['em']['middle'], substr($maskedSrc, 0, $index+2));
+
+        if($cap) {
+          return [
+            'type' => 'em',
+            'raw'  => substr($src, 0, strlen($cap[0])),
+            'text' => substr($src, 1, strlen($cap[0])-2)
+          ];
+        }
+      }
     }
   }
 
@@ -984,10 +1094,19 @@ class Tokenizer {
     $cap = preg_match_get($this->rules['inline']['code'], $src);
 
     if ($cap) {
+      $text = str_replace("\n", ' ', $cap[2]);
+
+      $hasNonSpaceChars = preg_match('/[^ ]/', $text);
+      $hasSpaceCharsOnBothEnds = preg_match('/^ /', $text) && preg_match('/ $/', $text);
+
+      if ($hasNonSpaceChars && $hasSpaceCharsOnBothEnds) {
+        $text = substr($text, 1, strlen($text) - 1);
+      }
+
       return [
         'type' => 'codespan',
         'raw' => $cap[0],
-        'text' => Helpers::escape(trim($cap[2]), true)
+        'text' => Helpers::escape($text, true)
       ];
     }
   }
@@ -1018,7 +1137,7 @@ class Tokenizer {
       return [
         'type' => 'del',
         'raw' => $cap[0],
-        'text' => $cap[1]
+        'text' => $cap[2]
       ];
     }
   }
@@ -1136,21 +1255,21 @@ class Rules {
     $block['code']       = "/^( {4}[^\\n]+\\n*)+/";
     $block['fences']     = "/^ {0,3}(`{3,}(?=[^`\\n]*\\n)|~{3,})([^\\n]*)\\n(?:|([\\s\\S]*?)\\n)(?: {0,3}\\1[~`]* *(?:\\n+|$)|$)/";
     $block['hr']         = "/^ {0,3}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)/";
-    $block['heading']    = "/^ {0,3}(#{1,6}) +([^\\n]*?)(?: +#+)? *(?:\\n+|$)/";
+    $block['heading']    = "/^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\\n+|$)/";
     $block['lheading']   = "/^([^\\n]+)\\n {0,3}(=+|-+) *(?:\\n+|$)/";
     $block['blockquote'] = "/^( {0,3}> ?(paragraph|[^\\n]*)(?:\\n|$))+/";
     $block['def']        = "/^ {0,3}\\[(label)\\]: *\\n? *<?([^\\s>]+)>?(?:(?: +\\n? *| *\\n *)(title))? *(?:\\n+|$)/";
     
-    $block['list']       = "/^( {0,3})(bull) [\\s\\S]+?(?:hr|def|\\n{2,}(?! )(?!\\1bull )\\n*|\\s*$)/";
-    $block['bullet']     = "/(?:[*+-]|\\d{1,9}\\.)/";
-    $block['item']       = "/^( *)(bull) ?[^\\n]*(?:\\n(?!\\1bull ?)[^\\n]*)*/";
+    $block['list']       = "/^( {0,3})(bull) [\\s\\S]+?(?:hr|def|\\n{2,}(?! )(?! {0,3}bull )\\n*|\\s*$)/";
+    $block['bullet']     = "/(?:[*+-]|\\d{1,9}[.)])/";
+    $block['item']       = "/^( *)(bull) ?[^\\n]*(?:\\n(?! *bull ?)[^\\n]*)*/";
 
     $block['html']       = "/^ {0,3}(?:" // optional indentation
                             . "<(script|pre|style)[\\s>][\\s\\S]*?(?:<\\/\\1>[^\\n]*\\n+|$)" // (1)
                             . "|comment[^\\n]*(\\n+|$)" // (2)
-                            . "|<\\?[\\s\\S]*?\\?>\\n*" // (3)
-                            . "|<![A-Z][\\s\\S]*?>\\n*" // (4)
-                            . "|<!\\[CDATA\\[[\\s\\S]*?\\]\\]>\\n*" // (5)
+                            . "|<\\?[\\s\\S]*?(?:\\?>\\n*|$)" // (3)
+                            . "|<![A-Z][\\s\\S]*?(?:>\\n*|$)" // (4)
+                            . "|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\\n*|$)" // (5)
                             . "|<\\/?(tag)(?: +|\\n|\\/?>)[\\s\\S]*?(?:\\n{2,}|$)" // (6)
                             . "|<(?!script|pre|style)([a-z][\\w-]*)(?:attribute)*? *\\/?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:\\n{2,}|$)" // (7) open tag
                             . "|<\\/(?!script|pre|style)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:\\n{2,}|$)" // (7) closing tag
@@ -1163,7 +1282,7 @@ class Rules {
     // regex template, placeholders will be replaced according to different paragraph
     // interruption rules of commonmark and the original markdown spec:
     $block['_paragraph'] = "/^([^\\n]+(?:\\n(?!hr|heading|lheading|blockquote|fences|list|html)[^\\n]+)*)/";
-    $block['_comment']   = "/<!--(?!-?>)[\\s\\S]*?-->/";
+    $block['_comment']   = "/<!--(?!-?>)[\\s\\S]*?(?:-->|$)/";
     $block['_label']     = "/(?!\\s*\\])(?:\\\\[\\[\\]]|[^\\[\\]])+/";
     $block['_title']     = "/(?:\"(?:\\\\\"?|[^\"\\\\])*\"|'[^'\\n]*(?:\\n[^'\\n]+)*\\n?'|\\([^()]*\\))/";
 
@@ -1182,7 +1301,11 @@ class Rules {
     $block['item'] = Helpers::edit($block['item'], 'm')
                     ->replace('bull', $block['bullet'])
                     ->getRegex();
-    
+
+    $block['listItemStart'] = Helpers::edit('/^( *)(bull)/')
+                     ->replace('bull', $block['bullet'])
+                     ->getRegex();
+
     $block['list'] = Helpers::edit($block['list'])
                      ->replace('bull', $block['bullet'])
                      ->replace('hr', "\\n+(?=\\1?(?:(?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$))")
@@ -1223,12 +1346,12 @@ class Rules {
     $block['gfm'] = array_merge([], $block['normal']);
     
     $block['gfm']['nptable'] = "/^ *([^|\\n ].*\\|.*)\\n" // header
-                                . " *([-:]+ *\\|[-| :]*)" // align
+                                . " {0,3}([-:]+ *\\|[-| :]*)" // align
                                 . "(?:\\n((?:(?!\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)/"; // cells
 
     // Cells
     $block['gfm']['table'] = "/^ *\\|(.+)\\n" // header
-                              . " *\\|?( *[-:]+[-| :]*)" // align
+                              . " {0,3}\\|?( *[-:]+[-| :]*)" // align
                               . "(?:\\n *((?:(?!\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)/"; // cells
 
     $block['gfm']['nptable'] = Helpers::edit($block['gfm']['nptable'])
@@ -1272,7 +1395,7 @@ class Rules {
                                   ->getRegex();
     
     $block['pedantic']['def'] = "/^ *\\[([^\\]]+)\\]: *<?([^\\s>]+)>?(?: +([\"(][^\\n]+[\")]))? *(?:\\n+|$)/";
-    $block['pedantic']['heading'] = "/^ *(#{1,6}) *([^\\n]+?) *(?:#+ *)?(?:\\n+|$)/";
+    $block['pedantic']['heading'] = "/^(#{1,6})(.*)(?:\\n+|$)/";
     
     $block['pedantic']['fences'] = Helpers::$noopTest; // fences not supported
     $block['pedantic']['paragraph'] = Helpers::edit($block['pedantic']['_paragraph'])
@@ -1304,31 +1427,73 @@ class Rules {
     $inline['link']     = "/^!?\\[(label)\\]\\(\\s*(href)(?:\\s+(title))?\\s*\\)/";
     $inline['reflink']  = "/^!?\\[(label)\\]\\[(?!\\s*\\])((?:\\\\[\\[\\]]?|[^\\[\\]\\\\])+)\\]/";
     $inline['nolink']   = "/^!?\\[(?!\\s*\\])((?:\\[[^\\[\\]]*\\]|\\\\[\\[\\]]|[^\\[\\]])*)\\](?:\\[\\])?/";
-    $inline['strong']   = "/^__([^\\s_])__(?!_)"
-                            . "|^\\*\\*([^\\s*])\\*\\*(?!\\*)"
-                            . "|^__([^\\s][\\s\\S]*?[^\\s])__(?!_)"
-                            . "|^\\*\\*([^\\s][\\s\\S]*?[^\\s])\\*\\*(?!\\*)/";
-    
-    $inline['em']       = "/^_([^\\s_])_(?!_)"
-                            . "|^_([^\\s_<][\\s\\S]*?[^\\s_])_(?!_|[^\\spunctuation])"
-                            . "|^_([^\\s_<][\\s\\S]*?[^\\s])_(?!_|[^\\spunctuation])"
-                            . "|^\\*([^\\s*<\\[])\\*(?!\\*)"
-                            . "|^\\*([^\\s<\"][\\s\\S]*?[^\\s\\[\\*])\\*(?![\\]`punctuation])"
-                            . "|^\\*([^\\s*\"<\\[][\\s\\S]*[^\\s])\\*(?!\\*)/";
-    
+    $inline['reflinkSearch'] = "/reflink|nolink(?!\\()/";
+
+    $inline['strong'] = [
+      'start'  => "/^(?:(\\*\\*(?=[*punctuation]))|\\*\\*)(?![\\s])|__/",
+      'middle' => "/^\\*\\*(?:"
+                          . "(?:(?!overlapSkip)(?:[^*]|\\\\\\*)|overlapSkip)"
+                      . "|\\*(?:(?!overlapSkip)(?:[^*]|\\\\\\*)|overlapSkip)*?\\*"
+                    . ")+?\\*\\*$"
+                    . "|^__(?![\\s])((?:"
+                          . "(?:(?!overlapSkip)(?:[^_]|\\_)|overlapSkip)"
+                        . "|_(?:(?!overlapSkip)(?:[^_]|\\_)|overlapSkip)*?_"
+                      . ")+?)__$/",
+
+      'endAst' => "/[^punctuation\\s]\\*\\*(?!\\*)|[punctuation]\\*\\*(?!\\*)(?:(?=[punctuation_\\s]|$))/",
+      'endUnd' => "/[^\\s]__(?!_)(?:(?=[punctuation*\\s])|$)/"
+    ];
+
+    $inline['em'] = [
+      'start'  => "/^(?:(\\*(?=[punctuation]))|\\*)(?![*\\s])|_/",
+      'middle' => "/^\\*(?:"
+                         . "(?:(?!overlapSkip)(?:[^*]|\\\\\\*)|overlapSkip)"
+                      . "|\*(?:(?!overlapSkip)(?:[^*]|\\\\\\*)|overlapSkip)*?\\*"
+                    . ")+?\\*$"
+                    . "|^_(?![_\\s])(?:"
+                        . "(?:(?!overlapSkip)(?:[^_]|\\\\_)|overlapSkip)"
+                      . "|_(?:(?!overlapSkip)(?:[^_]|\\\\_)|overlapSkip)*?_"
+                    . ")+?_$/",
+
+      'endAst' => "/[^punctuation\s]\\*(?!\\*)|[punctuation]\\*(?!\\*)(?:(?=[punctuation_\\s]|$))/",
+      'endUnd' => "/[^\\s]_(?!_)(?:(?=[punctuation*\\s])|$)/"
+    ];
+
     $inline['code']     = "/^(`+)([^`]|[^`][\\s\\S]*?[^`])\\1(?!`)/";
     $inline['br']       = "/^( {2,}|\\\\)\\n(?!\\s*$)/";
     $inline['del']      = Helpers::$noopTest;
-    $inline['text']     = "/^(`+|[^`])(?:[\\s\\S]*?(?:(?=[\\\\<!\\[`*]|\\b_|$)|[^ ](?= {2,}\\n))|(?= {2,}\\n))/";
-    
+    $inline['text']     = "/^(`+|[^`])(?:(?= {2,}\\n)|[\\s\\S]*?(?:(?=[\\\\<!\\[`*]|\\b_|$)|[^ ](?= {2,}\\n))|(?= {2,}\\n)))/";
+    $inline['punctuation'] = '/^([\\s*punctuation])/';
+
     // list of punctuation marks from common mark spec
-    // without ` and ] to workaround Rule 17 (inline code blocks/links)
-    $inline['_punctuation'] = "/!\"#$%&'\\(\\)\\*+\\-.\\/:;<=>?@\\[^_{|}~/";
-    
-    $inline['em']       = Helpers::edit($inline['em'])
+    // without * and _ to workaround cases with double emphasis
+    $inline['_punctuation'] = "/!\"#$%&'()+\\-.,\\/:;<=>?@\\[\\]`^{|}~/";
+
+    // sequences em should skip over [title](link), `code`, <html>
+    $inline['punctuation'] = Helpers::edit($inline['punctuation'])
                           ->replace('punctuation', $inline['_punctuation'])
                           ->getRegex();
-    
+
+    $inline['_blockSkip']   = "/\\[[^\\]]*?\\]\\([^\\)]*?\\)|`[^`]*?`|<[^>]*?>/";
+    $inline['_overlapSkip'] = "/__[^_]*?__|\\*\\*\\[^\\*\\]*?\\*\\*/";
+
+    $inline['_comment'] = Helpers::edit($block['_comment'])
+                          ->replace('(?:-->|$)', '-->')
+                          ->getRegex();
+
+    $inline['em']['start']  = Helpers::edit($inline['em']['start'])->replace('punctuation', $inline['_punctuation'])->getRegex();
+    $inline['em']['middle'] = Helpers::edit($inline['em']['middle'])->replace('punctuation', $inline['_punctuation'])->replace('overlapSkip', $inline['_overlapSkip'])->getRegex();
+    $inline['em']['endAst'] = Helpers::edit($inline['em']['endAst'])->replace('punctuation', $inline['_punctuation'])->getRegex();
+    $inline['em']['endUnd'] = Helpers::edit($inline['em']['endUnd'])->replace('punctuation', $inline['_punctuation'])->getRegex();
+
+    $inline['strong']['start']  = Helpers::edit($inline['strong']['start'])->replace('punctuation', $inline['_punctuation'])->getRegex();
+    $inline['strong']['middle'] = Helpers::edit($inline['strong']['middle'])->replace('punctuation', $inline['_punctuation'])->replace('overlapSkip', $inline['_overlapSkip'])->getRegex();
+    $inline['strong']['endAst'] = Helpers::edit($inline['strong']['endAst'])->replace('punctuation', $inline['_punctuation'])->getRegex();
+    $inline['strong']['endUnd'] = Helpers::edit($inline['strong']['endUnd'])->replace('punctuation', $inline['_punctuation'])->getRegex();
+
+    $inline['blockSkip']   = Helpers::edit($inline['_blockSkip'])->getRegex();
+    $inline['overlapSkip'] = Helpers::edit($inline['_overlapSkip'])->getRegex();
+
     $inline['_escapes'] = "/\\\\([!\"#$%&'()*+,\\-.\\/:;<=>?@\\[\\]\\\\^_`{|}~])/";
     $inline['_scheme']  = "/[a-zA-Z][a-zA-Z0-9+.-]{1,31}/";
     $inline['_email']   = "/[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+"
@@ -1342,12 +1507,12 @@ class Rules {
     $inline['_attribute'] = "/\\s+[a-zA-Z:_][\\w.:-]*(?:\\s*=\\s*\"[^\"]*\"|\\s*=\\s*'[^']*'|\\s*=\\s*[^\\s\"'=<>`]+)?/";
     
     $inline['tag']      = Helpers::edit($inline['tag'])
-                          ->replace('comment', $block['_comment'])
+                          ->replace('comment', $inline['_comment'])
                           ->replace('attribute', $inline['_attribute'])
                           ->getRegex();
     
-    $inline['_label']   = "/(?:\\[[^\\[\\]]*\\]|\\\\.|`[^`]*`|[^\\[\\]\\\\`])*?/";
-    $inline['_href']    = "/<(?:\\\\[<>]?|[^\\s<>\\\\])*>|[^\\s\\x00-\\x1f]*/";
+    $inline['_label']   = "/(?:\\[(?:\\\\.|[^\\[\\]\\\\])*\\]|\\\\.|`[^`]*`|[^\\[\\]\\\\`])*?/";
+    $inline['_href']    = "/<(?:\\\\.|[^\\n<>\\\\])+>|[^\\s\\x00-\\x1f]*/";
     $inline['_title']   = "/\"(?:\\\\\"?|[^\"\\\\])*\"|'(?:\\\\'?|[^'\\\\])*'|\\((?:\\\\\\)?|[^)\\\\])*\\)/";
     
     $inline['link']     = Helpers::edit($inline['link'])
@@ -1359,7 +1524,12 @@ class Rules {
     $inline['reflink']  = Helpers::edit($inline['reflink'])
                           ->replace('label', $inline['_label'])
                           ->getRegex();
-    
+
+    $inline['reflinkSearch'] = Helpers::edit($inline['reflinkSearch'])
+                          ->replace('reflink', $inline['reflink'])
+                          ->replace('nolink', $inline['nolink'])
+                          ->getRegex();
+
     /**
      * Normal Inline Grammar
      */
@@ -1372,8 +1542,19 @@ class Rules {
 
     $inline['pedantic'] = array_merge([], $inline['normal']);
 
-    $inline['pedantic']['strong'] = "/^__(?=\\S)([\\s\\S]*?\\S)__(?!_)|^\\*\\*(?=\\S)([\\s\\S]*?\\S)\\*\\*(?!\\*)/";
-    $inline['pedantic']['em']     = "/^_(?=\\S)([\\s\\S]*?\\S)_(?!_)|^\\*(?=\\S)([\\s\\S]*?\\S)\\*(?!\\*)/";
+    $inline['pedantic']['strong'] = [
+      'start' => "/^__|\\*\\*/",
+      'middle' => "/^__(?=\\S)([\\s\\S]*?\\S)__(?!_)|^\\*\\*(?=\\S)([\\s\\S]*?\\S)\\*\\*(?!\\*)/",
+      'endAst' => "/\\*\\*(?!\\*)/",
+      'endUnd' => "/__(?!_)/"
+    ];
+
+    $inline['pedantic']['em'] = [
+      'start' => "/^_|\\*/",
+      'middle' => "/^()\\*(?=\\S)([\\s\\S]*?\\S)\*(?!\\*)|^_(?=\\S)([\\s\\S]*?\\S)_(?!_)/",
+      'endAst' => "/\\*(?!\\*)/",
+      'endUnd' => "/_(?!_)/"
+    ];
 
     $inline['pedantic']['link']   = Helpers::edit("/^!?\\[(label)\\]\\((.*?)\\)/")
                                     ->replace('label', $inline['_label'])
@@ -1399,15 +1580,15 @@ class Rules {
 
     $inline['gfm']['url']        = "/^((?:ftp|https?):\\/\\/|www\\.)(?:[a-zA-Z0-9\\-]+\\.?)+[^\\s<]*|^email/";
     $inline['gfm']['_backpedal'] = "/(?:[^?!.,:;*_~()&]+|\\([^)]*\\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_~)]+(?!$))+/";
-    $inline['gfm']['del']        = "/^~+(?=\\S)([\\s\\S]*?\\S)~+/";
-    $inline['gfm']['text']       = "/^(`+|[^`])"
-                                      . "(?:[\\s\\S]*?"
+    $inline['gfm']['del']       = "/^(~~?)(?=[^\\s~])([\\s\\S]*?[^\\s~])\\1(?=[^~]|$)/";
+    $inline['gfm']['text']       = "/^([`~]+|[^`~])"
+                                      . "(?:(?= {2,}\\n)|[\\s\\S]*?"
                                       . "(?:"
                                         . "(?=[\\\\<!\\[`*~]|\\b_|https?:\\/\\/|ftp:\\/\\/|www\\.|$)"
                                         . "|[^ ](?= {2,}\\n)"
                                         . "|[^a-zA-Z0-9.!#$%&'*+\\/=?_`{\\|}~-](?=[a-zA-Z0-9.!#$%&'*+\\/=?_`{\\|}~-]+@)"
                                       . ")"
-                                      . "|(?= {2,}\\n|[a-zA-Z0-9.!#$%&'*+\\/=?_`{\\|}~-]+@))/";
+                                      . "|(?=[a-zA-Z0-9.!#$%&'*+\\/=?_`{\\|}~-]+@))/";
 
     $inline['gfm']['url'] = Helpers::edit($inline['gfm']['url'], 'i')
                             ->replace('email', $inline['gfm']['_extended_email'])
@@ -1549,12 +1730,20 @@ function mangle($text) {
   }
 
   /**
+   * Static Lex Inline Method
+   */
+  public static function lexInline($src, $options) {
+    $lexer = new Lexer($options);
+    return $lexer->inlineTokens($src);
+  }
+
+  /**
    * Preprocessing
    * @param string $src
    * @return array
    */
   public function _lex($src) {
-    $src = str_replace(["\r\n", "\r", "\t"], ["\n", "\n", "\t"], $src);
+    $src = str_replace(["\r\n", "\r", "\t"], ["\n", "\n", "    "], $src);
 
     $this->tokens = $this->blockTokens($src, [], true);
     $this->tokens = $this->inline($this->tokens);
@@ -1597,7 +1786,7 @@ function mangle($text) {
         }
         continue;
       }
-      
+
       // fences
       if ($token = $this->tokenizer->fences($src)) {
         $src = substr($src, strlen($token['raw']));
@@ -1788,7 +1977,47 @@ function mangle($text) {
    * @return array
    */
   public function inlineTokens($src, $tokens = [], $inLink = false, $inRawBlock = false) {
+
+    // String with links masked to avoid interference with em and strong
+    $maskedSrc = $src;
+
+    // Mask out reflinks
+    if ($this->links) {
+      $lastIndex = 0;
+
+      while (preg_match($this->tokenizer->rules['inline']['reflinkSearch'], $maskedSrc, $matches, PREG_OFFSET_CAPTURE, $lastIndex)) {
+        list($match, $index) = $matches[0];
+        $lastIndex = $index + strlen($match);
+
+        $tag = substr($match, strrpos($match, '[')+1, -1);
+
+        if (isset($this->links[$tag])) {
+          $maskedSrc = substr($maskedSrc, 0, $index)
+                     . '[' . str_repeat('a', strlen($match)-2) . ']'
+                     . substr($maskedSrc, $lastIndex);
+        }
+      }
+    }
+
+    // Mask out other blocks
+    $lastIndex = 0;
+    while (preg_match($this->tokenizer->rules['inline']['blockSkip'], $maskedSrc, $matches, PREG_OFFSET_CAPTURE, $lastIndex)) {
+      list($match, $index) = $matches[0];
+      $lastIndex = $index + strlen($match);
+
+      $maskedSrc = substr($maskedSrc, 0, $index)
+                 . '[' . str_repeat('a', strlen($match)-2) . ']'
+                 . substr($maskedSrc, $lastIndex);
+    }
+
+    $keepPrevChar = true;
+    $prevChar = '';
+
     while($src !== '') {
+      if(!$keepPrevChar) {
+        $prevChar = '';
+      }
+      $keepPrevChar = false;
 
       // escape
       if ($token = $this->tokenizer->escape($src)) {
@@ -1831,7 +2060,7 @@ function mangle($text) {
       }
 
       // strong
-      if ($token = $this->tokenizer->strong($src)) {
+      if ($token = $this->tokenizer->strong($src, $maskedSrc, $prevChar)) {
         $src = substr($src, strlen($token['raw']));
         $token['tokens'] = $this->inlineTokens($token['text'], [], $inLink, $inRawBlock);
         $tokens[] = $token;
@@ -1839,7 +2068,7 @@ function mangle($text) {
       }
 
       // em
-      if ($token = $this->tokenizer->em($src)) {
+      if ($token = $this->tokenizer->em($src, $maskedSrc, $prevChar)) {
         $src = substr($src, strlen($token['raw']));
         $token['tokens'] = $this->inlineTokens($token['text'], [], $inLink, $inRawBlock);
         $tokens[] = $token;
@@ -1885,6 +2114,10 @@ function mangle($text) {
       // text
       if ($token = $this->tokenizer->inlineText($src, $inRawBlock, __NAMESPACE__ . "\smartypants")) {
         $src = substr($src, strlen($token['raw']));
+
+        $prevChar = substr($token['raw'], -1);
+        $keepPrevChar = true;
+
         $tokens[] = $token;
         continue;
       }
@@ -2227,28 +2460,56 @@ class Slugger {
   }
 
   /**
-   * Convert string to unique id
+   * Convert string to id
    * @param string $value
    * @return string
    */
-  public function slug($value) {
+  public function serialize($value) {
     $slug = strtolower(trim($value));
     $slug = preg_replace('/<[!\/a-z].*?>/i', '', $slug); // remove html tags
     $slug = preg_replace('/[\x{2000}-\x{206F}\x{2E00}-\x{2E7F}\\\'!"#$%&()*+,.\/:;<=>?@[\]^`{|}~]/u', '', $slug); // remove unwanted chars
     $slug = preg_replace('/\s/', '-', $slug);
+    return $slug;
+  }
+
+  /**
+   * Finds the next safe (unique) slug to use
+   * @param string $originalSlug
+   * @param boolean $isDryRun
+   */
+   public function getNextSafeSlug($originalSlug, $isDryRun) {
+     $slug = $originalSlug;
+     $occurenceAccumulator = 0;
 
     if (isset($this->seen[$slug])) {
-      $originalSlug = $slug;
+      $occurenceAccumulator = $this->seen[$originalSlug];
 
       do {
-        $this->seen[$originalSlug] += 1;
-        $slug = $originalSlug . '-' . $this->seen[$originalSlug];
+        $occurenceAccumulator += 1;
+        $slug = $originalSlug . '-' . $occurenceAccumulator;
       } while (isset($this->seen[$slug]));
     }
 
-    $this->seen[$slug] = 0;
+    if(!$isDryRun) {
+      $this->seen[$originalSlug] = $occurenceAccumulator;
+      $this->seen[$slug] = 0;
+    }
     return $slug;
   }
+
+  /**
+   * Convert string to unique id
+   * If dryrun: Generates the next unique slug without updating the internal accumulator.
+   *
+   * @param string $value
+   * @param array $options - {dryrun: boolean}
+   * @return string
+   */
+  public function slug($value, $options=[]) {
+    $slug = $this->serialize($value);
+    return $this->getNextSafeSlug($slug, @$options['dryrun']);
+  }
+
 }
 
 /**
@@ -2307,6 +2568,14 @@ class Parser {
   }
 
   /**
+   * Static Parse Inline Method
+   */
+  public static function parseInline($tokens, $options = []) {
+    $parser = new Parser($options);
+    return $parser->_parseInline($tokens);
+  }
+
+  /**
    * Parse Loop
    * @param array $tokens
    * @param boolean $top
@@ -2329,9 +2598,9 @@ class Parser {
 
         case 'heading':
           $out .= $this->renderer->heading(
-                    $this->parseInline($token['tokens']),
+                    $this->_parseInline($token['tokens']),
                     $token['depth'],
-                    Helpers::unescape($this->parseInline($token['tokens'], $this->textRenderer)),
+                    Helpers::unescape($this->_parseInline($token['tokens'], $this->textRenderer)),
                     $this->slugger
                   );
           continue;
@@ -2347,7 +2616,7 @@ class Parser {
           $cells = '';
 
           for ($j = 0; $j < $l2; $j++) {
-            $cells .= $this->renderer->tablecell($this->parseInline($token['tokens']['header'][$j]), [
+            $cells .= $this->renderer->tablecell($this->_parseInline($token['tokens']['header'][$j]), [
               'header' => true,
               'align'  => $token['align'][$j]
             ]);
@@ -2364,7 +2633,7 @@ class Parser {
             $cells = '';
 
             for ($k = 0; $k < $l3; $k++) {
-              $cells .= $this->renderer->tablecell($this->parseInline($row[$k]), [
+              $cells .= $this->renderer->tablecell($this->_parseInline($row[$k]), [
                 'header' => false,
                 'align'  => $token['align'][$k]
               ]);
@@ -2400,9 +2669,9 @@ class Parser {
               $checkbox = $this->renderer->checkbox($checked);
 
               if($loose) {
-                $firstToken = $item['tokens'][0];
+                if($item['tokens'] && $item['tokens'][0]['type'] == 'text') {
+                  $firstToken = $item['tokens'][0];
 
-                if($firstToken['type'] == 'text') {
                   $firstToken['text'] = $checkbox . ' ' . $firstToken['text'];
   
                   if (isset($firstToken['tokens']) && sizeof($firstToken['tokens']) > 0 && $firstToken['tokens'][0]['type'] === 'text') {
@@ -2432,15 +2701,15 @@ class Parser {
           continue;
 
         case 'paragraph':
-          $out .= $this->renderer->paragraph(isset($token['tokens']) ? $this->parseInline($token['tokens']) : $token['text']);
+          $out .= $this->renderer->paragraph(isset($token['tokens']) ? $this->_parseInline($token['tokens']) : $token['text']);
           continue;
 
         case 'text':
-          $body = @$token['tokens'] ? $this->parseInline($token['tokens']) : $token['text'];
+          $body = @$token['tokens'] ? $this->_parseInline($token['tokens']) : $token['text'];
 
           while ($i + 1 < $l && $tokens[$i + 1]['type'] === 'text') {
             $token = $tokens[++$i];
-            $body .= "\n" . (isset($token['tokens']) ? $this->parseInline($token['tokens']) : $token['text']);
+            $body .= "\n" . (isset($token['tokens']) ? $this->_parseInline($token['tokens']) : $token['text']);
           }
   
           $out .= $top ? $this->renderer->paragraph($body) : $body;
@@ -2465,7 +2734,7 @@ class Parser {
   /**
    * Parse Inline Tokens
    */
-  public function parseInline($tokens, $renderer = null) {
+  public function _parseInline($tokens, $renderer = null) {
     if($renderer === null) {
       $renderer = $this->renderer;
     }
@@ -2486,7 +2755,7 @@ class Parser {
           break;
 
         case 'link':
-          $out .= $renderer->link($token['href'], @$token['title'], $this->parseInline($token['tokens'], $renderer));
+          $out .= $renderer->link($token['href'], @$token['title'], $this->_parseInline($token['tokens'], $renderer));
           break;
 
         case 'image':
@@ -2494,11 +2763,11 @@ class Parser {
           break;
 
         case 'strong':
-          $out .= $renderer->strong($this->parseInline($token['tokens'], $renderer));
+          $out .= $renderer->strong($this->_parseInline($token['tokens'], $renderer));
           break;
 
         case 'em':
-          $out .= $renderer->em($this->parseInline($token['tokens'], $renderer));
+          $out .= $renderer->em($this->_parseInline($token['tokens'], $renderer));
           break;
 
         case 'codespan':
@@ -2510,7 +2779,7 @@ class Parser {
           break;
 
         case 'del':
-          $out .= $renderer->del($this->parseInline($token['tokens'], $renderer));
+          $out .= $renderer->del($this->_parseInline($token['tokens'], $renderer));
           break;
 
         case 'text':
